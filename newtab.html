@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New Tab</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- GOOGLE APPS TRAY (Top Right) -->
+    <div id="googleAppsTray" class="google-apps-tray">
+      <button
+        id="googleAppsToggle"
+        class="google-apps-icon"
+        title="Google apps"
+      >
+        <span class="waffle-grid">
+          <span></span><span></span><span></span> <span></span><span></span
+          ><span></span> <span></span><span></span><span></span>
+        </span>
+      </button>
+      <div id="googleAppsMenu" class="google-apps-menu hidden">
+        <div class="google-apps-grid">
+          <!-- Apps will be injected here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- QUEST LOG WIDGET (Top Left) -->
+    <div id="questLog" class="quest-log" title="Manage your daily tasks">
+      <div class="quest-header">
+        <span title="Track your daily goals">QUEST_LOG</span>
+        <div class="quest-controls">
+          <button id="addQuestBtn" class="quest-btn" title="Add Quest">
+            +
+          </button>
+          <button id="toggleQuestBtn" class="quest-btn" title="Minimize">
+            ▲
+          </button>
+        </div>
+      </div>
+      <div id="questContent">
+        <div class="quest-list" id="questList">
+          <!-- Active Quests -->
+        </div>
+        <div class="quest-divider hidden" id="completedDivider">COMPLETED</div>
+        <div class="quest-list completed-list" id="completedQuestList">
+          <!-- Completed Quests -->
+        </div>
+        <button id="clearCompletedBtn" class="clear-btn hidden">
+          CLEAR COMPLETED
+        </button>
+      </div>
+    </div>
+
+    <div class="scanline"></div>
+
+    <div class="retro-container">
+      <div class="ui-header">
+        <span class="ui-title">TEMPORAL_STATUS</span>
+        <div class="ui-controls">
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+      </div>
+
+      <div id="onboarding" class="screen-content">
+        <p class="pixel-text">INITIALIZE_CHARACTER:</p>
+
+        <div class="form-group">
+          <label>SPAWN DATE</label>
+          <input type="date" id="dobInput" />
+        </div>
+
+        <div class="form-group">
+          <label>REGION</label>
+          <select id="countryInput"></select>
+        </div>
+
+        <div class="form-group">
+          <label>GENDER</label>
+          <select id="genderInput">
+            <option value="male">MALE</option>
+            <option value="female">FEMALE</option>
+          </select>
+        </div>
+
+        <button id="saveBtn" class="pixel-btn">START GAME</button>
+        <button id="skipBtn" class="skip-btn">SKIP INITIALIZATION</button>
+      </div>
+
+      <div id="app" class="screen-content hidden">
+        <!-- SEARCH -->
+        <div class="search-container">
+          <input
+            type="text"
+            id="searchInput"
+            class="search-input"
+            placeholder="SEARCH WEB..."
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="hud-row">
+          <div class="hud-stat">
+            <span class="label">LEVEL</span>
+            <span class="value" id="levelDisplay">0</span>
+          </div>
+          <div class="hud-stat right">
+            <span class="label">MAX CAP</span>
+            <span class="value" id="capDisplay">80</span>
+          </div>
+        </div>
+
+        <!-- CYCLE SWITCHER -->
+        <div class="cycle-switcher">
+          <button class="cycle-btn active" data-cycle="life">LIFE</button>
+          <button class="cycle-btn" data-cycle="year">YEAR</button>
+          <button class="cycle-btn" data-cycle="month">MONTH</button>
+          <button class="cycle-btn" data-cycle="day">DAY</button>
+        </div>
+
+        <div class="eclipse-container">
+          <div class="sun"></div>
+          <div class="shadow" id="eclipseShadow"></div>
+        </div>
+
+        <div class="exp-container">
+          <div class="exp-label">EXP PROGRESS</div>
+          <div class="exp-bar-bg">
+            <div class="exp-bar-fill" id="expBar"></div>
+          </div>
+          <div class="exp-percent" id="percentDisplay">0%</div>
+        </div>
+
+        <div class="quote" id="timeLeftDisplay">LOADING DATA...</div>
+      </div>
+
+      <div class="ui-footer">
+        <select id="themeSelect">
+          <option value="theme-cosmic">THEME: COSMIC</option>
+          <option value="theme-gameboy">THEME: GAMEBOY</option>
+          <option value="theme-vaporwave">THEME: VAPORWAVE</option>
+          <option value="theme-redalert">THEME: RED ALERT</option>
+          <option value="theme-amber">THEME: AMBER</option>
+          <option value="theme-matrix">THEME: MATRIX</option>
+          <option value="theme-sepia">THEME: SEPIA MAP</option>
+          <option value="theme-ice">THEME: ICE PLANET</option>
+          <option value="theme-lavender">THEME: LAVENDER</option>
+          <option value="theme-highcontrast">THEME: 1-BIT</option>
+        </select>
+        <button id="resetBtn" class="reset-btn">RESET</button>
+      </div>
+    </div>
+
+    <!-- INVENTORY DOCK (SHORTCUTS) -->
+    <div class="inventory-dock" id="inventoryDock">
+      <!-- Slots injected via JS -->
+    </div>
+
+    <!-- CUSTOM MODAL OVERLAY -->
+    <div id="customModal" class="modal-overlay hidden">
+      <div class="retro-container modal-box">
+        <div class="ui-header">
+          <span class="ui-title" id="modalTitle">SYSTEM_MSG</span>
+          <div class="ui-controls">
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+        <div class="screen-content">
+          <p id="modalMessage" class="pixel-text"></p>
+          <div id="modalInputContainer" class="hidden">
+            <input
+              type="text"
+              id="modalInput"
+              class="search-input"
+              autocomplete="off"
+            />
+          </div>
+          <div class="modal-actions">
+            <button id="modalBtnCancel" class="skip-btn hidden">CANCEL</button>
+            <button id="modalBtnOk" class="pixel-btn">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
