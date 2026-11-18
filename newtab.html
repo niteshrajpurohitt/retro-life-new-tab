@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>New Tab</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="styles.css" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
-      rel="stylesheet"
-    />
   </head>
   <body>
+    <!-- FOCUS TIMER LAUNCHER (Top Right, beside Google apps) -->
+    <button id="focusBtn" class="focus-launcher" title="Focus timer (Boss Battle)">
+      <span class="icon-timer" aria-hidden="true"></span>
+      <span class="sr-only">Focus timer</span>
+    </button>
+
     <!-- GOOGLE APPS TRAY (Top Right) -->
     <div id="googleAppsTray" class="google-apps-tray">
       <button
@@ -61,6 +61,21 @@
     </div>
 
     <div class="scanline"></div>
+
+    <!-- FOCUS TIMER: BOSS BATTLE BAR -->
+    <div id="bossBar" class="boss-bar hidden" role="status">
+      <div class="boss-sprite" aria-hidden="true"></div>
+      <div class="boss-info">
+        <div class="boss-title">
+          <span id="bossLabel">BOSS BATTLE</span>
+          <span id="bossTime">25:00</span>
+        </div>
+        <div class="boss-hp-bg">
+          <div class="boss-hp-fill" id="bossHp"></div>
+        </div>
+      </div>
+      <button id="bossActionBtn" class="boss-btn">RETREAT</button>
+    </div>
 
     <div class="retro-container">
       <div class="ui-header">
@@ -143,6 +158,7 @@
         </div>
 
         <div class="quote" id="timeLeftDisplay">LOADING DATA...</div>
+        <div class="tab-counter hidden" id="tabCounter">TABS TODAY: 0</div>
       </div>
 
       <div class="ui-footer">
@@ -158,6 +174,10 @@
           <option value="theme-lavender">THEME: LAVENDER</option>
           <option value="theme-highcontrast">THEME: 1-BIT</option>
         </select>
+        <button id="settingsBtn" class="reset-btn settings-btn" title="Settings">
+          <span class="icon-gear" aria-hidden="true"></span>
+          <span class="sr-only">Settings</span>
+        </button>
         <button id="resetBtn" class="reset-btn">RESET</button>
       </div>
     </div>
@@ -165,6 +185,71 @@
     <!-- INVENTORY DOCK (SHORTCUTS) -->
     <div class="inventory-dock" id="inventoryDock">
       <!-- Slots injected via JS -->
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settingsModal" class="modal-overlay hidden">
+      <div class="retro-container modal-box settings-box">
+        <div class="ui-header">
+          <span class="ui-title">SETTINGS</span>
+          <div class="ui-controls">
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+        <div class="screen-content">
+          <p class="settings-section">DAY HOURS</p>
+          <div class="settings-row">
+            <div class="form-group">
+              <label for="dayStartInput">START</label>
+              <input type="time" id="dayStartInput" step="900" />
+            </div>
+            <div class="form-group">
+              <label for="dayEndInput">END</label>
+              <input type="time" id="dayEndInput" step="900" />
+            </div>
+          </div>
+          <p class="settings-hint">
+            THE DAY CYCLE TRACKS ONLY THESE HOURS. SET START = END FOR A FULL 24H DAY.
+          </p>
+
+          <p class="settings-section">TAB COUNTER</p>
+          <label class="checkbox-row" for="tabCounterToggle">
+            <input type="checkbox" id="tabCounterToggle" />
+            <span>SHOW TABS OPENED TODAY</span>
+          </label>
+
+          <div class="modal-actions">
+            <button id="settingsCancelBtn" class="skip-btn">CANCEL</button>
+            <button id="settingsSaveBtn" class="pixel-btn">SAVE</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FOCUS (BOSS BATTLE) MODAL -->
+    <div id="focusModal" class="modal-overlay hidden">
+      <div class="retro-container modal-box">
+        <div class="ui-header">
+          <span class="ui-title">BOSS_BATTLE</span>
+          <div class="ui-controls">
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+        </div>
+        <div class="screen-content">
+          <p class="pixel-text">CHOOSE BATTLE LENGTH:</p>
+          <div class="focus-options">
+            <button class="focus-option" data-minutes="15">15 MIN</button>
+            <button class="focus-option" data-minutes="25">25 MIN</button>
+            <button class="focus-option" data-minutes="50">50 MIN</button>
+          </div>
+          <p class="settings-hint" id="bossesDefeated">BOSSES DEFEATED: 0</p>
+          <div class="modal-actions">
+            <button id="focusCancelBtn" class="skip-btn">CANCEL</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- CUSTOM MODAL OVERLAY -->
@@ -196,5 +281,6 @@
     </div>
 
     <script src="script.js"></script>
+    <script src="focus.js"></script>
   </body>
 </html>

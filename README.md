@@ -22,6 +22,16 @@ Gamify your daily tasks. The **Quest Log** allows you to:
 *   Clear completed quests to keep your log clean.
 *   Minimalist interface that creates a satisfying "quest completion" feel.
 
+### ⚔️ Boss Battle (Focus Timer)
+Start a 15, 25 or 50 minute focus session from the ⚔ button. A pixel boss appears and its HP drains as the minutes pass — stay on task until it's defeated.
+*   The battle continues across every new tab (the remaining time also shows in the tab title).
+*   Missed the ending? The victory shows up on your next new tab.
+*   Track how many bosses you've defeated.
+
+### ⚙️ Settings
+*   **Day Hours**: Set when your day starts and ends (e.g. 07:00–23:00) so the DAY cycle tracks your waking hours instead of midnight to midnight. Night-owl schedules that cross midnight work too.
+*   **Tab Counter**: See how many new tabs you've opened today (can be turned off).
+
 ### 🎒 Inventory Dock (Shortcuts)
 Keep your most important links in your **Inventory**. Add shortcuts to your favorite websites for quick access, visualized as inventory slots.
 

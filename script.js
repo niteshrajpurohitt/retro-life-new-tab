@@ -11,6 +11,7 @@
   const MAX_SHORTCUT_SLOTS = 5;
   const ANIMATION_DELAY_MS = 100;
   const ECLIPSE_ANIMATION_DELAY_MS = 300;
+  const LIVE_REFRESH_MS = 30 * 1000;
 
   const GOOGLE_APPS = Object.freeze([
     { name: "Gmail", icon: "📧", url: "https://mail.google.com" },
@@ -249,9 +250,7 @@
   //STATE
   let currentCycle = "life";
   let userData = {};
-  let isDragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
+  let settings; // initialised in the SETTINGS section below
 
   //UTILITY FUNCTIONS
 
@@ -329,6 +328,62 @@
   }
 
   /**
+   * Parse a "YYYY-MM-DD" string as a LOCAL date.
+   * (new Date("YYYY-MM-DD") parses as UTC, which shifts the day for users west of UTC.)
+   * @param {string} str
+   * @returns {Date|null}
+   */
+  function parseLocalDate(str) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str || "");
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+
+  /**
+   * Midnight (local) of the given date
+   * @param {Date} date
+   * @returns {Date}
+   */
+  function startOfDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  /**
+   * Normalize user input into an absolute http(s) URL, or null if invalid
+   * @param {string} input
+   * @returns {string|null}
+   */
+  function normalizeUrl(input) {
+    const trimmed = (input || "").trim();
+    if (!trimmed) return null;
+    const withProtocol = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    try {
+      const url = new URL(withProtocol);
+      const host = url.hostname;
+      if (!host || (!host.includes(".") && host !== "localhost")) {
+        return null;
+      }
+      return url.href;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Local favicon URL via Chrome's built-in favicon cache (no third-party request)
+   * @param {string} pageUrl
+   * @returns {string}
+   */
+  function faviconUrl(pageUrl) {
+    const url = new URL(chrome.runtime.getURL("/_favicon/"));
+    url.searchParams.set("pageUrl", pageUrl);
+    url.searchParams.set("size", "32");
+    return url.toString();
+  }
+
+  /**
    * Escape HTML entities to prevent XSS
    * @param {string} text - Text to escape
    * @returns {string}
@@ -337,6 +392,120 @@
     const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // ============ SETTINGS ============
+  const DEFAULT_SETTINGS = Object.freeze({
+    dayStart: "00:00",
+    dayEnd: "00:00",
+    showTabCounter: true,
+  });
+  settings = normalizeSettings();
+
+  /**
+   * Merge saved settings with defaults, dropping anything malformed
+   * @param {Object} [raw]
+   * @returns {{dayStart: string, dayEnd: string, showTabCounter: boolean}}
+   */
+  function normalizeSettings(raw) {
+    const out = { ...DEFAULT_SETTINGS };
+    if (raw && typeof raw === "object") {
+      if (parseTimeToMinutes(raw.dayStart) !== null) out.dayStart = raw.dayStart;
+      if (parseTimeToMinutes(raw.dayEnd) !== null) out.dayEnd = raw.dayEnd;
+      if (typeof raw.showTabCounter === "boolean") out.showTabCounter = raw.showTabCounter;
+    }
+    return out;
+  }
+
+  /**
+   * "HH:MM" -> minutes since midnight, or null if invalid
+   * @param {string} str
+   * @returns {number|null}
+   */
+  function parseTimeToMinutes(str) {
+    const m = /^(\d{2}):(\d{2})$/.exec(str || "");
+    if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23 || min > 59) return null;
+    return h * MINUTES_PER_HOUR + min;
+  }
+
+  /**
+   * The user's custom waking-hours window, or null for a normal 24h day
+   * @returns {{start: number, end: number, length: number}|null}
+   */
+  function getDayWindow() {
+    const start = parseTimeToMinutes(settings.dayStart);
+    const end = parseTimeToMinutes(settings.dayEnd);
+    if (start === null || end === null || start === end) return null;
+    const dayMins = HOURS_PER_DAY * MINUTES_PER_HOUR;
+    const length = end > start ? end - start : end + dayMins - start;
+    return { start, end, length };
+  }
+
+  /**
+   * Remaining minutes -> "4H 20M" / "35M" (rounded up, like a countdown)
+   * @param {number} minutes
+   * @returns {string}
+   */
+  function formatDuration(minutes) {
+    const total = Math.max(0, Math.ceil(minutes - 1e-9));
+    const h = Math.floor(total / MINUTES_PER_HOUR);
+    const m = total % MINUTES_PER_HOUR;
+    return h > 0 ? `${h}H ${m}M` : `${m}M`;
+  }
+
+  // ============ TAB COUNTER ============
+  /**
+   * Local date as "YYYY-MM-DD"
+   * @param {Date} date
+   * @returns {string}
+   */
+  function localDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function renderTabCounter(tabStats) {
+    const el = getElement("tabCounter");
+    if (!el) return;
+    if (!settings.showTabCounter) {
+      el.classList.add("hidden");
+      return;
+    }
+    const today = localDateKey(new Date());
+    const count = tabStats && tabStats.date === today ? tabStats.count : 0;
+    el.textContent = `TABS TODAY: ${count}`;
+    el.classList.remove("hidden");
+  }
+
+  /**
+   * Count this new tab (page reloads are not counted), then render
+   */
+  async function countThisTab() {
+    let isReload = false;
+    try {
+      const nav = performance.getEntriesByType("navigation")[0];
+      isReload = !!nav && nav.type === "reload";
+    } catch (e) {
+      // ignore
+    }
+
+    const res = await storageGet(["tabStats"]);
+    const today = localDateKey(new Date());
+    const stats =
+      res.tabStats && res.tabStats.date === today
+        ? res.tabStats
+        : { date: today, count: 0 };
+
+    if (!isReload) {
+      stats.count += 1;
+      await storageSet({ tabStats: stats });
+    }
+    renderTabCounter(stats);
   }
 
   // CUSTOM MODAL 
@@ -383,6 +552,7 @@
         // Show modal
         els.overlay.classList.remove("hidden");
         if (type === "prompt") els.input.focus();
+        else els.btnOk.focus();
 
         // Click outside to close (for confirm/alert only)
         els.overlay.onclick = (e) => {
@@ -399,8 +569,23 @@
           els.btnCancel.onclick = null;
           els.input.onkeydown = null;
           els.overlay.onclick = null;
+          document.removeEventListener("keydown", onKeyDown, true);
           resolve(value);
         };
+
+        // Keyboard: Enter = OK, Escape = Cancel (works for every modal type)
+        const onKeyDown = (e) => {
+          if (e.isComposing) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            els.btnOk.click();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            if (type === "alert") els.btnOk.click();
+            else els.btnCancel.click();
+          }
+        };
+        document.addEventListener("keydown", onKeyDown, true);
 
         els.btnOk.onclick = () => {
           if (type === "prompt") close(els.input.value);
@@ -412,12 +597,6 @@
           else close(false);
         };
 
-        if (type === "prompt") {
-          els.input.onkeydown = (e) => {
-            if (e.key === "Enter") els.btnOk.click();
-            if (e.key === "Escape") els.btnCancel.click();
-          };
-        }
       });
     },
 
@@ -438,7 +617,8 @@
 
     if (currentCycle === "life") {
       if (!userData.dob) return null;
-      const birthDate = new Date(userData.dob);
+      const birthDate = parseLocalDate(userData.dob);
+      if (!birthDate) return null;
       const dataSet = LIFE_DATA[userData.country] || LIFE_DATA["Global Average"];
       const maxAge = dataSet[userData.gender];
       const totalDays = maxAge * DAYS_PER_YEAR;
@@ -458,21 +638,26 @@
             : `BONUS STAGE: +${Math.abs(yearsLeft).toFixed(1)} YEARS`,
       };
     } else if (currentCycle === "year") {
-      const start = new Date(now.getFullYear(), 0, 0);
-      const diff = now - start;
-      const dayOfYear = Math.floor(diff / MS_PER_DAY);
-      const totalDays = isLeapYear(now.getFullYear()) ? 366 : 365;
+      const year = now.getFullYear();
+      const start = new Date(year, 0, 1);
+      const end = new Date(year + 1, 0, 1);
+      // Use real start/end timestamps so DST shifts can't cause off-by-one days
+      const fraction = (now - start) / (end - start);
+      const totalDays = isLeapYear(year) ? 366 : 365;
+      const dayOfYear = Math.round((startOfDay(now) - start) / MS_PER_DAY) + 1;
 
       return {
         current: dayOfYear,
         max: totalDays,
-        percent: (dayOfYear / totalDays) * 100,
+        percent: fraction * 100,
         label: "DAY PASSED",
         maxLabel: "TOTAL DAYS",
         msg: `ORBIT PROGRESS: ${dayOfYear}/${totalDays} DAYS`,
       };
     } else if (currentCycle === "month") {
       const dayOfMonth = now.getDate();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       const totalDays = new Date(
         now.getFullYear(),
         now.getMonth() + 1,
@@ -482,7 +667,7 @@
       return {
         current: dayOfMonth,
         max: totalDays,
-        percent: (dayOfMonth / totalDays) * 100,
+        percent: ((now - start) / (end - start)) * 100,
         label: "DAY PASSED",
         maxLabel: "TOTAL DAYS",
         msg: `LUNAR CYCLE: ${dayOfMonth}/${totalDays} DAYS`,
@@ -492,6 +677,41 @@
       const mins = now.getMinutes();
       const totalMins = hours * MINUTES_PER_HOUR + mins;
       const dayMins = HOURS_PER_DAY * MINUTES_PER_HOUR;
+
+      const dayWindow = getDayWindow();
+      if (dayWindow) {
+        // Custom waking hours (may cross midnight, e.g. 10:00 -> 02:00)
+        const nowMins = totalMins + now.getSeconds() / 60;
+        const sinceStart = (nowMins - dayWindow.start + dayMins) % dayMins;
+        const totalHours = Math.round((dayWindow.length / MINUTES_PER_HOUR) * 10) / 10;
+
+        let percent;
+        let msg;
+        if (sinceStart <= dayWindow.length) {
+          percent = (sinceStart / dayWindow.length) * 100;
+          msg = `TIME LEFT: ${formatDuration(dayWindow.length - sinceStart)}`;
+        } else {
+          // Outside waking hours: closer to the end -> resting, closer to the start -> not started
+          const sinceEnd = (nowMins - dayWindow.end + dayMins) % dayMins;
+          const untilStart = (dayWindow.start - nowMins + dayMins) % dayMins;
+          if (sinceEnd < untilStart) {
+            percent = 100;
+            msg = "REST MODE: DAY COMPLETE";
+          } else {
+            percent = 0;
+            msg = `DAY STARTS IN ${formatDuration(untilStart)}`;
+          }
+        }
+
+        return {
+          current: Math.floor(((percent / 100) * dayWindow.length) / MINUTES_PER_HOUR),
+          max: totalHours,
+          percent,
+          label: "HOURS PASSED",
+          maxLabel: "WAKING HOURS",
+          msg,
+        };
+      }
 
       return {
         current: hours,
@@ -578,7 +798,9 @@
     if (!inventoryDock) return;
 
     storageGet(["inventory"]).then((res) => {
-      const inventory = res.inventory || [];
+      // Drop any corrupted entries so one bad item can't break the whole dock
+      const inventory = (Array.isArray(res.inventory) ? res.inventory : [])
+        .filter((item) => item && normalizeUrl(item.url));
       inventoryDock.innerHTML = "";
 
       for (let i = 0; i < MAX_SHORTCUT_SLOTS; i++) {
@@ -587,49 +809,63 @@
 
         if (inventory[i]) {
           const item = inventory[i];
-          slot.setAttribute("data-title", item.title);
+          const itemUrl = normalizeUrl(item.url);
+          const title = item.title || new URL(itemUrl).hostname;
+          slot.setAttribute("data-title", title);
+          slot.title = title;
 
-          // Icon
-          const iconUrl = `https://www.google.com/s2/favicons?domain=${
-            new URL(item.url).hostname
-          }&sz=24`;
-          slot.innerHTML = `<img src="${iconUrl}" alt="${item.title}">`;
+          // Icon (from Chrome's local favicon cache)
+          const img = document.createElement("img");
+          img.src = faviconUrl(itemUrl);
+          img.alt = title;
+          slot.appendChild(img);
 
           // Click to open
           slot.addEventListener("click", () => {
-            window.location.href = item.url;
+            window.location.href = itemUrl;
           });
 
           // Right click to remove
           slot.addEventListener("contextmenu", async (e) => {
             e.preventDefault();
             const confirmed = await CustomModal.confirm(
-              `Delete shortcut to ${item.title}?`
+              `Delete shortcut to ${title}?`
             );
             if (confirmed) {
-              inventory.splice(i, 1);
-              await storageSet({ inventory });
+              // Re-read storage so changes from other tabs aren't overwritten
+              const latest = await storageGet(["inventory"]);
+              const current = Array.isArray(latest.inventory) ? latest.inventory : [];
+              const idx = current.findIndex((s) => s && s.url === item.url);
+              if (idx !== -1) current.splice(idx, 1);
+              await storageSet({ inventory: current });
               renderInventory();
             }
           });
         } else {
           slot.className += " empty";
+          slot.title = "Add shortcut";
           slot.addEventListener("click", async () => {
-            const url = await CustomModal.prompt(
+            const input = await CustomModal.prompt(
               "Enter URL for shortcut:",
               "e.g., youtube.com"
             );
-            if (url) {
-              let finalUrl = url.startsWith("http") ? url : `https://${url}`;
-              try {
-                const domain = new URL(finalUrl).hostname;
-                inventory.push({ title: domain, url: finalUrl });
-                await storageSet({ inventory });
-                renderInventory();
-              } catch (e) {
-                await CustomModal.alert("Invalid URL");
-              }
+            if (input === null || !input.trim()) return;
+
+            const finalUrl = normalizeUrl(input);
+            if (!finalUrl) {
+              await CustomModal.alert("Invalid URL");
+              return;
             }
+            const latest = await storageGet(["inventory"]);
+            const current = Array.isArray(latest.inventory) ? latest.inventory : [];
+            if (current.length >= MAX_SHORTCUT_SLOTS) {
+              await CustomModal.alert("INVENTORY FULL");
+              renderInventory();
+              return;
+            }
+            current.push({ title: new URL(finalUrl).hostname, url: finalUrl });
+            await storageSet({ inventory: current });
+            renderInventory();
           });
         }
         inventoryDock.appendChild(slot);
@@ -638,6 +874,21 @@
   }
 
   // ============ QUEST LOG ============
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * Read the latest quests from storage, transform them, save, and re-render.
+   * @param {(quests: Array) => Array} transform
+   */
+  async function updateQuests(transform) {
+    const res = await storageGet(["quests"]);
+    const quests = Array.isArray(res.quests) ? res.quests : [];
+    await storageSet({ quests: transform(quests) });
+    renderQuests();
+  }
+
   function renderQuests() {
     const questLog = getElement("questLog");
     const questList = getElement("questList");
@@ -648,8 +899,17 @@
 
     if (!questLog || !questList) return;
 
-    storageGet(["quests", "questLogCollapsed"]).then((res) => {
-      const quests = res.quests || [];
+    storageGet(["quests", "questLogCollapsed"]).then(async (res) => {
+      const quests = Array.isArray(res.quests) ? res.quests : [];
+
+      // One-time migration: older quests have no id
+      if (quests.some((q) => !q.id)) {
+        quests.forEach((q) => {
+          if (!q.id) q.id = newId();
+        });
+        await storageSet({ quests });
+      }
+
       const isCollapsed = res.questLogCollapsed || false;
 
       // Handle Collapsed State
@@ -674,7 +934,7 @@
       let activeCount = 0;
       let completedCount = 0;
 
-      quests.forEach((quest, index) => {
+      quests.forEach((quest) => {
         const item = document.createElement("div");
         item.className = `quest-item ${quest.completed ? "completed" : ""}`;
         item.innerHTML = `
@@ -682,20 +942,20 @@
           <span>${escapeHtml(quest.text)}</span>
         `;
 
-        // Toggle Complete
+        // Toggle Complete (re-read storage so other tabs' changes aren't lost)
         item.addEventListener("click", async () => {
-          quests[index].completed = !quests[index].completed;
-          await storageSet({ quests });
-          renderQuests();
+          await updateQuests((list) =>
+            list.map((q) =>
+              q.id === quest.id ? { ...q, completed: !q.completed } : q
+            )
+          );
         });
 
         // Right click delete
         item.addEventListener("contextmenu", async (e) => {
           e.preventDefault();
           if (await CustomModal.confirm("ABANDON QUEST?")) {
-            quests.splice(index, 1);
-            await storageSet({ quests });
-            renderQuests();
+            await updateQuests((list) => list.filter((q) => q.id !== quest.id));
           }
         });
 
@@ -754,16 +1014,6 @@
     // Render apps
     renderGoogleApps();
 
-    // Load saved position
-    storageGet(["googleAppsTrayPosition"]).then((res) => {
-      if (res.googleAppsTrayPosition) {
-        const pos = res.googleAppsTrayPosition;
-        googleAppsTray.style.left = pos.x + "px";
-        googleAppsTray.style.top = pos.y + "px";
-        googleAppsTray.style.right = "auto";
-      }
-    });
-
     // Toggle menu
     googleAppsToggle.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -777,37 +1027,76 @@
       }
     });
 
-    // Draggable functionality
-    googleAppsToggle.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return; // Only left-click
-      isDragging = true;
-      const rect = googleAppsTray.getBoundingClientRect();
-      dragOffsetX = e.clientX - rect.left;
-      dragOffsetY = e.clientY - rect.top;
-      googleAppsTray.style.cursor = "grabbing";
-      e.preventDefault();
-    });
+    // Clean up the position saved by the old draggable version
+    try {
+      chrome.storage.local.remove("googleAppsTrayPosition");
+    } catch (e) {
+      // ignore
+    }
+  }
 
-    document.addEventListener("mousemove", (e) => {
-      if (!isDragging) return;
-      const newX = e.clientX - dragOffsetX;
-      const newY = e.clientY - dragOffsetY;
-      googleAppsTray.style.left = newX + "px";
-      googleAppsTray.style.top = newY + "px";
-      googleAppsTray.style.right = "auto";
-    });
+  // ============ SETTINGS MODAL ============
+  function initSettingsModal() {
+    const settingsBtn = getElement("settingsBtn");
+    const modal = getElement("settingsModal");
+    const startInput = getElement("dayStartInput");
+    const endInput = getElement("dayEndInput");
+    const tabToggle = getElement("tabCounterToggle");
+    const saveBtn = getElement("settingsSaveBtn");
+    const cancelBtn = getElement("settingsCancelBtn");
+    if (!settingsBtn || !modal || !startInput || !endInput || !tabToggle) return;
 
-    document.addEventListener("mouseup", () => {
-      if (isDragging) {
-        isDragging = false;
-        googleAppsTray.style.cursor = "grab";
-        // Save position to chrome.storage (unified storage)
-        const position = {
-          x: parseFloat(googleAppsTray.style.left) || googleAppsTray.offsetLeft,
-          y: parseFloat(googleAppsTray.style.top) || googleAppsTray.offsetTop,
-        };
-        storageSet({ googleAppsTrayPosition: position });
+    const close = () => {
+      modal.classList.add("hidden");
+      document.removeEventListener("keydown", onKeyDown, true);
+      settingsBtn.focus();
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
       }
+    };
+
+    settingsBtn.addEventListener("click", () => {
+      startInput.value = settings.dayStart;
+      endInput.value = settings.dayEnd;
+      tabToggle.checked = settings.showTabCounter;
+      modal.classList.remove("hidden");
+      document.addEventListener("keydown", onKeyDown, true);
+      startInput.focus();
+    });
+
+    cancelBtn?.addEventListener("click", close);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) close();
+    });
+
+    saveBtn?.addEventListener("click", async () => {
+      // Empty time inputs fall back to midnight
+      const dayStart = startInput.value || "00:00";
+      const dayEnd = endInput.value || "00:00";
+      if (
+        parseTimeToMinutes(dayStart) === null ||
+        parseTimeToMinutes(dayEnd) === null
+      ) {
+        close();
+        await CustomModal.alert("ERROR: INVALID TIME.");
+        return;
+      }
+      const next = normalizeSettings({
+        dayStart,
+        dayEnd,
+        showTabCounter: tabToggle.checked,
+      });
+      settings = next;
+      await storageSet({ settings: next });
+      close();
+      const app = getElement("app");
+      if (app && !app.classList.contains("hidden")) renderDashboard();
+      const res = await storageGet(["tabStats"]);
+      renderTabCounter(res.tabStats);
     });
   }
 
@@ -854,8 +1143,19 @@
     }
 
     // Load Saved Data & Theme
-    storageGet(["dob", "country", "gender", "theme", "currentCycle", "isGuest"]).then(
+    storageGet([
+      "dob",
+      "country",
+      "gender",
+      "theme",
+      "currentCycle",
+      "isGuest",
+      "settings",
+    ]).then(
       (res) => {
+        settings = normalizeSettings(res.settings);
+        countThisTab();
+
         // Apply theme
         if (res.theme) {
           document.body.className = res.theme;
@@ -963,6 +1263,10 @@
     const resetBtn = getElement("resetBtn");
     if (resetBtn) {
       resetBtn.addEventListener("click", async () => {
+        const confirmed = await CustomModal.confirm(
+          "RESET ALL DATA? THIS WILL ERASE YOUR CHARACTER, QUESTS, SHORTCUTS AND THEME."
+        );
+        if (!confirmed) return;
         try {
           await new Promise((resolve) => chrome.storage.local.clear(resolve));
         } catch (e) {
@@ -975,9 +1279,9 @@
     // Search Functionality
     const searchInput = getElement("searchInput");
     if (searchInput) {
-      searchInput.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") {
-          const query = searchInput.value;
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing) {
+          const query = searchInput.value.trim();
           if (query) {
              chrome.search.query({ text: query, disposition: "CURRENT_TAB" });
           }
@@ -996,13 +1300,13 @@
 
     if (addQuestBtn) {
       addQuestBtn.addEventListener("click", async () => {
-        const text = await CustomModal.prompt("NEW QUEST OBJECTIVE:");
+        const input = await CustomModal.prompt("NEW QUEST OBJECTIVE:");
+        const text = input ? input.trim() : "";
         if (text) {
-          const res = await storageGet(["quests"]);
-          const quests = res.quests || [];
-          quests.push({ text, completed: false });
-          await storageSet({ quests });
-          renderQuests();
+          await updateQuests((list) => [
+            ...list,
+            { id: newId(), text, completed: false },
+          ]);
         }
       });
     }
@@ -1018,11 +1322,7 @@
     if (clearCompletedBtn) {
       clearCompletedBtn.addEventListener("click", async () => {
         if (await CustomModal.confirm("CLEAR COMPLETED QUESTS?")) {
-          const res = await storageGet(["quests"]);
-          const quests = res.quests || [];
-          const activeQuests = quests.filter((q) => !q.completed);
-          await storageSet({ quests: activeQuests });
-          renderQuests();
+          await updateQuests((list) => list.filter((q) => !q.completed));
         }
       });
     }
@@ -1030,7 +1330,47 @@
     renderQuests();
 
     initGoogleAppsTray();
+
+    // Live refresh: keep stats current while the tab stays open
+    setInterval(() => {
+      const app = getElement("app");
+      if (app && !app.classList.contains("hidden")) renderDashboard();
+    }, LIVE_REFRESH_MS);
+
+    initSettingsModal();
+
+    // Keep multiple open tabs in sync
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        if (changes.settings) {
+          settings = normalizeSettings(changes.settings.newValue);
+          const app = getElement("app");
+          if (app && !app.classList.contains("hidden")) renderDashboard();
+          storageGet(["tabStats"]).then((r) => renderTabCounter(r.tabStats));
+        }
+        if (changes.tabStats) renderTabCounter(changes.tabStats.newValue);
+        if (changes.quests || changes.questLogCollapsed) renderQuests();
+        if (changes.inventory) renderInventory();
+        if (changes.theme && changes.theme.newValue) {
+          document.body.className = changes.theme.newValue;
+          const themeSelect = getElement("themeSelect");
+          if (themeSelect) themeSelect.value = changes.theme.newValue;
+        }
+      });
+    } catch (e) {
+      console.error("Storage listener error:", e);
+    }
   }
+
+  // Small shared API for the other feature scripts (focus.js)
+  window.RetroLife = Object.freeze({
+    storageGet,
+    storageSet,
+    getElement,
+    clamp,
+    CustomModal,
+  });
 
   // ============ ENTRY POINT ============
   document.addEventListener("DOMContentLoaded", initApp);
